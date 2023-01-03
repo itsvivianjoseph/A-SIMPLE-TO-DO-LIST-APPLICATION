@@ -1,63 +1,134 @@
 const express = require("express")
 const bodyparser = require("body-parser")
-
+const mongoose = require("mongoose")
 const app = express()
 
 app.set('view engine', 'ejs')
-
-var items = ["buy food","cook food","eat food"]
-var worklistitems = []
 
 app.use(bodyparser.urlencoded({extended:true}))
 
 app.use(express.static("public"))
 
-app.get("/",function(req,res){
+mongoose.set('strictQuery',false);
+mongoose.connect("mongodb://127.0.0.1:27017/todolistDB",{useNewUrlParser:true})
 
-    var today = new Date();
+const itemsSchema  = {
+    name : String
+}
 
-    var options = {weekday : "long" , day : "numeric" , month : "long"}
+const Item = mongoose.model("Item",itemsSchema)
 
-    var day = today.toLocaleDateString("en-US",options)
-
-    res.render("list", {
-        listtitle: day,
-        newlistitems: items
-    })
+const item1 = new Item({
+    name : "cook food"
 })
 
-app.post("/",function(req,res){
+const item2 = new Item({
+    name : "eat food"
+})
 
-    var item = req.body.newitem
+const item3 = new Item({
+    name : "buy groceries"
+})
 
-    if(req.body.list==="worklist")
-    {
-        worklistitems.push(item)
-        res.redirect("/work")
+const defaultItems = [item1,item2,item3]
+
+const listSchema = {
+    name: String,
+    items: [itemsSchema]
+} 
+
+const List = mongoose.model("List",listSchema)
+
+var today = new Date();
+
+var options = {weekday : "long" , day : "numeric" , month : "long"}
+
+var day = today.toLocaleDateString("en-US",options)
+
+app.get("/", function(req, res) {
+
+    Item.find({}, function(err, foundItems){
+  
+      if (foundItems.length === 0) {
+        Item.insertMany(defaultItems, function(err){
+          if (err) {
+            console.log(err);
+          } else {
+            console.log("Successfully saved default items to DB.");
+          }
+        });
+        res.redirect("/");
+      } 
+      else 
+      {
+        res.render("list", {listTitle: day, newListItems: foundItems});
+      }
+    });
+  
+  });
+
+  app.post("/", function(req, res){
+
+    const itemName = req.body.newItem;
+    const listName = req.body.list;
+  
+    const item = new Item({
+      name: itemName
+    });
+  
+    if (listName === day){
+      item.save();
+      res.redirect("/");
+    } else {
+      List.findOne({name: listName}, function(err, foundList){
+        foundList.items.push(item);
+        foundList.save();
+        res.redirect("/" + listName);
+      });
     }
-    else{
-        items.push(item)
-        res.redirect("/")
+  });
+
+  app.post("/delete", function(req, res){
+    const checkedItemId = req.body.checkbox;
+    const listName = req.body.listName;
+  
+    if (listName === day) {
+      Item.findByIdAndRemove(checkedItemId, function(err){
+        if (!err) {
+          console.log("Successfully deleted checked item.");
+          res.redirect("/");
+        }
+      });
+    } else {
+      List.findOneAndUpdate({name: listName}, {$pull: {items: {_id: checkedItemId}}}, function(err, foundList){
+        if (!err){
+          res.redirect("/" + listName);
+        }
+      });
     }
-                                
-})
+});
 
-app.get("/work",function(req,res){
+app.get("/:customListName", function(req, res){
+    const customListName = req.params.customListName;
+  
+    List.findOne({name: customListName}, function(err, foundList){
+      if (!err){
+        if (!foundList){
+          //Create a new list
+          const list = new List({
+            name: customListName,
+            items: defaultItems
+          });
+          list.save();
+          res.redirect("/" + customListName);
+        } else {
+          //Show an existing list
+          res.render("list", {listTitle: foundList.name, newListItems: foundList.items});
+        }
+      }
+    });
+  });
 
-    res.render("list",{ 
-        listtitle: "worklist", 
-        newlistitems: worklistitems 
-    })
-
-})
-                          
-app.post("/work",function(req,res){
-
-    var item = req.body.newitem
-    worklistitems.push(item)
-    res.redirect("/work")
-
-})
 
 app.listen(3000,function(){
     console.log("your listening on port 3000")
